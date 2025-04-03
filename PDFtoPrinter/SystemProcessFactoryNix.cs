@@ -1,4 +1,6 @@
-﻿namespace PDFtoPrinter
+﻿using System.Diagnostics;
+
+namespace PDFtoPrinter
 {
     public partial class SystemProcessFactory
     {

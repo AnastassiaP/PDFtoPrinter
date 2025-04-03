@@ -1,4 +1,7 @@
-﻿namespace PDFtoPrinter
+﻿using System;
+using System.IO;
+
+namespace PDFtoPrinter
 {
     public partial class PDFtoPrinterPrinter
     {

@@ -1,7 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFrameworks>net46;net47;net48;netstandard2.0;net6.0;net6.0-windows;net7.0;net7.0-windows;net8.0;net8.0-windows;net9.0;net9.0-windows;</TargetFrameworks>
+      <TargetFrameworks>
+        netstandard2.0;net6.0;net7.0;net8.0;net6.0-windows;net7.0-windows;net8.0-windows
+      </TargetFrameworks>
+      
+        <EnableWindowsTargeting>true</EnableWindowsTargeting>
+        
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
         <Authors>Sergey Vishneskiy, Morabaa Software Solutions, LTD.</Authors>
         <Company>Sergey Vishneskiy</Company>
@@ -24,9 +29,9 @@
         <FileVersion>1.0.0.0</FileVersion>
         <Version>1.0.0</Version>
     </PropertyGroup>
-      
-    <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
-      <DefineConstants>$(DefineConstants);WINDOWS</DefineConstants>
+
+    <PropertyGroup>
+        <DefineConstants Condition="$(TargetFramework.EndsWith('-windows'))">$(DefineConstants);WINDOWS</DefineConstants>
     </PropertyGroup>
 
     <PropertyGroup Condition="'$(Configuration)' == 'Debug' ">

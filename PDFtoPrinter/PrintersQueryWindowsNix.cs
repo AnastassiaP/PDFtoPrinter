@@ -1,4 +1,8 @@
-﻿namespace PDFtoPrinter
+﻿using System.Collections.Generic;
+using System.Diagnostics;
+using System.Threading.Tasks;
+
+namespace PDFtoPrinter
 {
     public partial class PrintersQuery
     {
