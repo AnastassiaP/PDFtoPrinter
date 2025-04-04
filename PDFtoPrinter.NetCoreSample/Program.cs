@@ -9,12 +9,12 @@ namespace PDFtoPrinter.NetCoreSample
             var wrapper = new PDFtoPrinterPrinter();
             //Print from file
             wrapper
-                .Print(new PrintingOptions("Microsoft Print to PDF", "somefile.pdf"))
+                .Print(new PrintingOptions("virtual_printer", "somefile.pdf"))
                 .Wait();
 
             // Print from stream
             wrapper
-                .Print(File.OpenRead("somefile.pdf"), new StreamPrintingOptions("Microsoft Print to PDF"))
+                .Print(File.OpenRead("somefile.pdf"), new StreamPrintingOptions("virtual_printer"))
                 .Wait();
         }
     }

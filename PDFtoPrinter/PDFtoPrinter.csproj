@@ -30,19 +30,12 @@
         <Version>1.0.0</Version>
     </PropertyGroup>
 
-    <PropertyGroup>
-        <DefineConstants Condition="$(TargetFramework.EndsWith('-windows'))">$(DefineConstants);WINDOWS</DefineConstants>
-    </PropertyGroup>
-
     <PropertyGroup Condition="'$(Configuration)' == 'Debug' ">
         <AssemblyVersion>1000.0.0.0</AssemblyVersion>
         <FileVersion>1000.0.0.0</FileVersion>
         <Version>1000.0.0</Version>
     </PropertyGroup>
-
-    <ItemGroup Condition="$(TargetFramework.EndsWith('-windows'))">
-        <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
-    </ItemGroup>
+  
 
     <ItemGroup>
         <None Include="build\*.*">

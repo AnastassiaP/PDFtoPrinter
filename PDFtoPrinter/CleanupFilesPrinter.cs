@@ -1,30 +1,32 @@
-﻿#if WINDOWS
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Printing;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Timers;
 
 namespace PDFtoPrinter
 {
     /// <summary>
-    /// Deletes files after printing. Doesn't print files by it selves but use inner printer.
+    /// Deletes files after printing. Doesn't print files by itself but uses an inner printer.
     /// </summary>
     public class CleanupFilesPrinter : IPrinter
     {
         public delegate void OnCleanupFailedHandler(QueuedFile file, Exception exception);
         public static event OnCleanupFailedHandler OnCleanupFailed;
+
         private static readonly IDictionary<string, ConcurrentQueue<QueuedFile>> printingQueues =
             new ConcurrentDictionary<string, ConcurrentQueue<QueuedFile>>();
+
         private static readonly object locker = new object();
-        private static readonly Timer cleanupTimer = new Timer(1 * 1000)
+        private static readonly Timer cleanupTimer = new Timer(1000)
         {
             AutoReset = true,
             Enabled = true
         };
+
         private static bool deletingInProgress = false;
 
         private readonly IPrinter inner;
@@ -32,31 +34,28 @@ namespace PDFtoPrinter
 
         static CleanupFilesPrinter()
         {
-            cleanupTimer.Elapsed += CleanupTimerElapsed;
-            cleanupTimer.Enabled = true;
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                cleanupTimer.Elapsed += CleanupTimerElapsed;
+            }
         }
 
-
-        /// <summary>
-        /// Creates new <see cref="CleanupFilesPrinter"/> instance.
-        /// </summary>
-        /// <param name="inner">The inner printer that will print files.</param>
-        /// <param name="waitFileDeletion">If "true" "Print" method will wait until a file is deleted.
-        /// The file will be deleted in background otherwise</param>
-        public CleanupFilesPrinter(
-            IPrinter inner,
-            bool waitFileDeletion = false)
+        public CleanupFilesPrinter(IPrinter inner, bool waitFileDeletion = false)
         {
             this.inner = inner;
             this.waitFileDeletion = waitFileDeletion;
         }
 
-        /// <inheritdoc/>
         public async Task Print(PrintingOptions options, TimeSpan? timeout = null)
         {
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                throw new PlatformNotSupportedException("CleanupFilesPrinter is only supported on Windows.");
+            }
+
             await this.inner.Print(options, timeout);
-            Task task = EnqueuePrintingFile(options.PrinterName, options.FilePath);
-            if (this.waitFileDeletion)
+            var task = EnqueuePrintingFile(options.PrinterName, options.FilePath);
+            if (waitFileDeletion)
             {
                 await task;
             }
@@ -64,10 +63,9 @@ namespace PDFtoPrinter
 
         private static Task EnqueuePrintingFile(string printerName, string filePath)
         {
-            ConcurrentQueue<QueuedFile> queue = GetQueue(printerName);
+            var queue = GetQueue(printerName);
             var file = new QueuedFile(filePath);
             queue.Enqueue(file);
-
             return file.TaskCompletionSource.Task;
         }
 
@@ -79,61 +77,82 @@ namespace PDFtoPrinter
                 {
                     if (!printingQueues.ContainsKey(printerName))
                     {
-                        printingQueues.Add(printerName, new ConcurrentQueue<QueuedFile>());
+                        printingQueues[printerName] = new ConcurrentQueue<QueuedFile>();
                     }
                 }
             }
-
             return printingQueues[printerName];
         }
 
         private static void CleanupTimerElapsed(object sender, ElapsedEventArgs e)
         {
-            if (deletingInProgress)
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows) || deletingInProgress)
             {
                 return;
             }
 
             deletingInProgress = true;
-            CleanupPrintedFiles(printingQueues);
-            deletingInProgress = false;
-        }
-
-        private static void CleanupPrintedFiles(
-            IDictionary<string, ConcurrentQueue<QueuedFile>> printingQueues)
-        {
-            using (var printServer = new PrintServer())
+            try
             {
-                foreach (KeyValuePair<string, ConcurrentQueue<QueuedFile>> queue
-                    in printingQueues)
-                {
-                    DeletePrintedFiles(printServer, queue.Key, queue.Value);
-                }
+                CleanupPrintedFiles(printingQueues);
+            }
+            catch (Exception)
+            {
+                // Optional: log or handle
+            }
+            finally
+            {
+                deletingInProgress = false;
             }
         }
 
-        private static void DeletePrintedFiles(
-            PrintServer printServer,
-            string queueName,
-            ConcurrentQueue<QueuedFile> files)
+        private static void CleanupPrintedFiles(IDictionary<string, ConcurrentQueue<QueuedFile>> queues)
         {
-            using (PrintQueue printerQueue = printServer.GetPrintQueue(queueName))
+            // Dynamically load types inside method to avoid type loading on non-Windows
+            var printServerType = Type.GetType("System.Printing.PrintServer, ReachFramework");
+            var printQueueType = Type.GetType("System.Printing.PrintQueue, ReachFramework");
+
+            if (printServerType == null || printQueueType == null)
+                return;
+
+            var printServer = (IDisposable)Activator.CreateInstance(printServerType);
+            foreach (var kv in queues)
             {
-                DeletePrintedFiles(files, printerQueue);
+                var method = printServerType.GetMethod("GetPrintQueue", new[] { typeof(string) });
+                var printQueue = method?.Invoke(printServer, new object[] { kv.Key });
+                if (printQueue == null) continue;
+
+                DeletePrintedFiles(kv.Value, printQueue, printQueueType);
+                (printQueue as IDisposable)?.Dispose();
             }
         }
 
         private static void DeletePrintedFiles(
             ConcurrentQueue<QueuedFile> files,
-            PrintQueue printerQueue)
+            object printQueue,
+            Type printQueueType)
         {
-            var printingItems = new HashSet<string>(printerQueue
-                .GetPrintJobInfoCollection()
-                .Select(x => x.Name.ToUpper()));
+            var getJobsMethod = printQueueType.GetMethod("GetPrintJobInfoCollection");
+            var jobs = getJobsMethod?.Invoke(printQueue, null) as System.Collections.IEnumerable;
+
+            var jobNames = new HashSet<string>();
+            foreach (var job in jobs ?? Array.Empty<object>())
+            {
+                var nameProp = job.GetType().GetProperty("Name");
+                if (nameProp != null)
+                {
+                    var name = nameProp.GetValue(job)?.ToString()?.ToUpper();
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        jobNames.Add(name);
+                    }
+                }
+            }
+
             while (!files.IsEmpty)
             {
                 files.TryPeek(out QueuedFile currentFile);
-                if (printingItems.Contains(Path.GetFileName(currentFile.Path).ToUpper()))
+                if (jobNames.Contains(Path.GetFileName(currentFile.Path).ToUpper()))
                 {
                     break;
                 }
@@ -152,18 +171,3 @@ namespace PDFtoPrinter
         }
     }
 }
-#else
-using System;
-using System.Threading.Tasks;
-
-namespace PDFtoPrinter
-{
-    public class CleaupFilesPrinter : IPrinter
-    {
-        public Task Print(PrintingOptions options, TimeSpan? timeout = null)
-        {
-            throw new PlatformNotSupportedException();
-        }
-    }
-}
-#endif
